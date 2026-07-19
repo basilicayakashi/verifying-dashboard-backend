@@ -66,7 +66,7 @@ router.get('/callback', async (req: Request, res: Response) => {
                 accessToken: tokenData.access_token,
             },
             JWT_SECRET,
-            { expiresIn: '7d' }
+            { expiresIn: '100d' }
         );
 
         // Redirige vers le dashboard Angular avec le JWT en query param

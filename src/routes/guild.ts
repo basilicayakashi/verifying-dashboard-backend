@@ -288,9 +288,68 @@ router.post('/saveReactionRoles', authMiddleware, async (req: any, res: Response
   }
 });
 
+router.post('/updateAutokick', authMiddleware, async (req: any, res: Response) => {
+  try {
+    const { guildId, days, text_to_send } = req.body;
 
+    if (!guildId) {
+      res.status(400).json({ error: 'Missing guildId' });
+      return;
+    }
 
+    if (days === null || days === undefined) {
+      await db.query('DELETE FROM autokick_settings WHERE guild_id = $1', [guildId]);
+      res.json({ success: true, action: 'deleted' });
+      return;
+    }
 
+    await db.query(`
+      INSERT INTO autokick_settings (guild_id, days, text_to_send)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (guild_id) DO UPDATE SET
+        days = EXCLUDED.days,
+        text_to_send = EXCLUDED.text_to_send
+    `, [guildId, days, text_to_send?.trim() || null]);
+
+    res.json({ success: true, action: 'upserted' });
+  } catch (error) {
+    console.error('updateAutokick error:', error);
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+router.post('/updateFreeGames', authMiddleware, async (req: any, res: Response) => {
+  try {
+    const { guildId, channel_id, enabled, include_steam, include_epicgames } = req.body;
+
+    if (!guildId) {
+      res.status(400).json({ error: 'Missing guildId' });
+      return;
+    }
+
+    if (!channel_id) {
+      await db.query('DELETE FROM free_games_settings WHERE guild_id = $1', [guildId]);
+      res.json({ success: true, action: 'deleted' });
+      return;
+    }
+
+    await db.query(`
+      INSERT INTO free_games_settings (guild_id, channel_id, enabled, include_steam, include_epicgames, updated_at)
+      VALUES ($1, $2, $3, $4, $5, NOW())
+      ON CONFLICT (guild_id) DO UPDATE SET
+        channel_id = EXCLUDED.channel_id,
+        enabled = EXCLUDED.enabled,
+        include_steam = EXCLUDED.include_steam,
+        include_epicgames = EXCLUDED.include_epicgames,
+        updated_at = NOW()
+    `, [guildId, channel_id, enabled, include_steam, include_epicgames]);
+
+    res.json({ success: true, action: 'upserted' });
+  } catch (error) {
+    console.error('updateFreeGames error:', error);
+    res.status(500).json({ error: 'Database error' });
+  }
+});
 
 
 
@@ -368,6 +427,11 @@ router.post('/:id', authMiddleware, async (req: any, res: Response) => {
       [guildId]
     );
 
+    const autokickResult = await db.query(
+      'SELECT * FROM autokick_settings WHERE guild_id = $1',
+      [guildId]
+    );
+
     // liste des emojis personnalisés du serveur
     const customEmojis = botGuild?.emojis.cache
       .map(e => ({
@@ -377,6 +441,16 @@ router.post('/:id', authMiddleware, async (req: any, res: Response) => {
         url: e.imageURL(),
         formatted: e.animated ? `<a:${e.name}:${e.id}>` : `<:${e.name}:${e.id}>`
       })) ?? [];
+
+    const freeGamesResult = await db.query(
+      'SELECT * FROM free_games_settings WHERE guild_id = $1',
+      [guildId]
+    );
+
+    const textChannels = botGuild?.channels.cache
+      .filter(c => c.type === 0) // 0 = GuildText
+      .map(c => ({ id: c.id, name: (c as any).name }))
+      .sort((a, b) => a.name.localeCompare(b.name)) ?? [];
 
     res.json({
       guild: {
@@ -394,6 +468,9 @@ router.post('/:id', authMiddleware, async (req: any, res: Response) => {
       roleMessageDeleteSettings: roleMessageDeleteSettingsResult.rows[0] ?? null,
       reactionRoleCategories: reactionRoleCategoriesResult.rows,
       reactionRoleEntries: reactionRoleEntriesResult.rows,
+      autokickSettings: autokickResult.rows[0] ?? null,
+      freeGamesSettings: freeGamesResult.rows[0] ?? null,
+      textChannels,
     });
   } catch (error) {
     console.error('get guild config error:', error);
